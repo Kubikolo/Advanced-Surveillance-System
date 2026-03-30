@@ -9,7 +9,7 @@ def generate_first_gen(objects, drones):
     for _ in drones:
         waypoints = []
         random.shuffle(objects)
-        for j, object in enumerate(objects):
+        for object in objects:
             random_cell = random.choice(object)
             waypoints.append(random_cell)
         first_gen.append(waypoints)
