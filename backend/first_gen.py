@@ -52,8 +52,3 @@ if __name__ == '__main__':
 
     print(generate_first_gen(objects, drones))
     print(validate(time_ticks=100, width=60, height=60, objects=objects, drones=drones))
-
-
-
-
-
