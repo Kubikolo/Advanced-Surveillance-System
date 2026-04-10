@@ -1,12 +1,16 @@
 import json
 
+from backend.drone import Drone
 from backend.path_generator import generate_path
 
 
 def parameters_parser(filename):
     with open(filename) as json_file:
         parameters = json.load(json_file)
-    return parameters
+    objects = [[(x, y) for x, y in inner] for inner in parameters["objects"]]
+    drones = [Drone((drone["starting_position"][0], drone["starting_position"][1]), drone["radius"], drone["tickspeed"]) for drone in parameters["drones"]]
+    dimensions = (parameters["dimensions"][0], parameters["dimensions"][1])
+    return {"objects":objects, "drones":drones, "dimensions":dimensions}
 
 def simulation_json_generator(filename, initial_steps, loop_steps, parameters):
     with open(f"../shared/{filename}", 'w') as json_file:
