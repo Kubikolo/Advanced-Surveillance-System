@@ -6,6 +6,16 @@ import matplotlib.animation as animation
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import matplotlib.image as mpimg
 
+def normalize_paths(data_list, drone_count):
+    if not data_list:
+        return [[] for _ in range(drone_count)]
+    if not isinstance(data_list[0][0], (list, tuple)):
+        result = [data_list]
+        for _ in range(drone_count - 1):
+            result.append([])
+        return result
+    return data_list
+
 def main():
     plt.rcParams['toolbar'] = 'None'
     
@@ -20,34 +30,38 @@ def main():
         print(f"Error: Could not find file: {json_path}")
         return
 
-    initial_steps = data.get("initial_steps", [])
-    loop_steps = data.get("loop_steps", [])
     objects = data.get("objects", [])
     drones_data = data.get("drones", [])
     dimensions = data.get("dimensions", [10, 10])
-
     width, height = dimensions[0], dimensions[1]
-    
-    full_path = initial_steps + loop_steps * 3
 
-    if not full_path:
+    initial_steps_raw = data.get("initial_steps", [])
+    loop_steps_raw = data.get("loop_steps", [])
+
+    drone_count = len(drones_data) if drones_data else 1
+    initial_paths = normalize_paths(initial_steps_raw, drone_count)
+    loop_paths = normalize_paths(loop_steps_raw, drone_count)
+
+    full_paths = []
+    max_frames = 0
+    for i in range(drone_count):
+        path = initial_paths[i] + loop_paths[i]
+        full_paths.append(path)
+        max_frames = max(max_frames, len(path))
+
+    if max_frames == 0:
         print("Error: Drone path data is missing.")
         return
 
-    circle_radius = drones_data[0]["radius"] if drones_data else 1
-    
+    wong_palette = ['#0072B2', '#D55E00', '#009E73', '#CC79A7', '#F0E442', '#56B4E9', '#E69F00']
     color_bg = '#000000'
     color_obstacle = '#E69F00'
-    color_path = '#0072B2'
-    color_vision = '#56B4E9'
 
     plt.style.use('dark_background')
     fig, ax = plt.subplots(figsize=(10, 8))
     fig.patch.set_facecolor('#1a1a1a')
     ax.set_facecolor(color_bg)
-    
     ax.set_aspect('equal', adjustable='box')
-
     ax.grid(True, color='#333333', linestyle='-', linewidth=0.5, zorder=0)
 
     for obj in objects:
@@ -65,78 +79,87 @@ def main():
     )
     ax.add_patch(boundary)
 
-    drone_trail, = ax.plot([], [], color=color_path, linewidth=2, alpha=0.6, zorder=8)
-    
-    vision_range = patches.Rectangle((0, 0), circle_radius*2, circle_radius*2, color=color_vision, fill=True, alpha=0.25, zorder=9)
-    ax.add_patch(vision_range)
-    
+    drone_artists = []
     has_drone_img = os.path.exists(drone_img_path)
-    drone_img_obj = None
-    drone_dot = None
-
+    drone_image_data = None
     if has_drone_img:
         try:
-            arr_img = mpimg.imread(drone_img_path)
-            drone_img_obj = ax.imshow(arr_img, extent=[0, 1, 0, 1], zorder=10)
-            drone_img_obj.set_visible(False)
+            drone_image_data = mpimg.imread(drone_img_path)
         except Exception as e:
             print(f"Error loading drone.png: {e}")
             has_drone_img = False
 
-    if not has_drone_img:
-        drone_dot, = ax.plot([], [], marker='o', color=color_path, markersize=12, markeredgecolor='white', zorder=10)
+    for i in range(drone_count):
+        color = wong_palette[i % len(wong_palette)]
+        trail, = ax.plot([], [], color=color, linewidth=2, alpha=0.6, zorder=8)
+        
+        radius = drones_data[i].get("radius", 1) if drones_data else 1
+        vision = patches.Rectangle((0, 0), radius*2, radius*2, color=color, fill=True, alpha=0.15, zorder=9)
+        ax.add_patch(vision)
 
-    all_x = [p[0] for p in full_path]
-    all_y = [p[1] for p in full_path]
-    
-    min_x = min(min(all_x) - circle_radius, -0.5)
-    max_x = max(max(all_x) + circle_radius, width - 0.5)
-    min_y = min(min(all_y) - circle_radius, -0.5)
-    max_y = max(max(all_y) + circle_radius, height - 0.5)
-    
+        drone_obj = None
+        if has_drone_img:
+            drone_obj = ax.imshow(drone_image_data, extent=[0, 1, 0, 1], zorder=10)
+            drone_obj.set_visible(False)
+        else:
+            drone_obj, = ax.plot([], [], marker='o', color=color, markersize=10, markeredgecolor='white', zorder=10)
+
+        drone_artists.append({
+            'trail': trail,
+            'vision': vision,
+            'drone': drone_obj,
+            'history_x': [],
+            'history_y': [],
+            'radius': radius
+        })
+
+    all_x = [p[0] for path in full_paths for p in path]
+    all_y = [p[1] for path in full_paths for p in path]
+    min_x = min(min(all_x or [0]) - 2, -0.5)
+    max_x = max(max(all_x or [width]) + 2, width - 0.5)
+    min_y = min(min(all_y or [0]) - 2, -0.5)
+    max_y = max(max(all_y or [height]) + 2, height - 0.5)
     ax.set_xlim(min_x, max_x)
     ax.set_ylim(min_y, max_y)
 
-    path_history_x = []
-    path_history_y = []
-
     def init():
-        drone_trail.set_data([], [])
-        path_history_x.clear()
-        path_history_y.clear()
-        vision_range.set_xy((-circle_radius, -circle_radius))
-        
-        if has_drone_img and drone_img_obj:
-            drone_img_obj.set_visible(True)
-        elif drone_dot:
-            drone_dot.set_data([], [])
+        for art in drone_artists:
+            art['trail'].set_data([], [])
+            art['history_x'].clear()
+            art['history_y'].clear()
+            r = art['radius']
+            art['vision'].set_xy((-r, -r))
+            if has_drone_img:
+                art['drone'].set_visible(True)
+            else:
+                art['drone'].set_data([], [])
         return []
 
     def update(frame):
-        current_pos = full_path[frame]
+        for i, art in enumerate(drone_artists):
+            path = full_paths[i]
+            if not path:
+                continue
+            
+            idx = min(frame, len(path) - 1)
+            pos = path[idx]
+            
+            art['history_x'].append(pos[0])
+            art['history_y'].append(pos[1])
+            art['trail'].set_data(art['history_x'], art['history_y'])
+            
+            r = art['radius']
+            art['vision'].set_xy((pos[0] - r, pos[1] - r))
+            
+            if has_drone_img:
+                art['drone'].set_extent([pos[0]-0.5, pos[0]+0.5, pos[1]-0.5, pos[1]+0.5])
+            else:
+                art['drone'].set_data([pos[0]], [pos[1]])
         
-        path_history_x.append(current_pos[0])
-        path_history_y.append(current_pos[1])
-        
-        drone_trail.set_data(path_history_x, path_history_y)
-        vision_range.set_xy((current_pos[0] - circle_radius, current_pos[1] - circle_radius))
-        
-        if has_drone_img and drone_img_obj:
-            drone_img_obj.set_extent([current_pos[0]-0.5, current_pos[0]+0.5, current_pos[1]-0.5, current_pos[1]+0.5])
-        elif drone_dot:
-            drone_dot.set_data([current_pos[0]], [current_pos[1]])
-        
-        ax.set_title(
-            f"Frame: {frame:03d} | Pos: {current_pos}",
-            color='#FFFFFF', fontsize=14, loc='center', pad=15, fontweight='bold'
-        )
+        ax.set_title(f"Multi-Drone Simulation | Frame: {frame:03d}", color='#FFFFFF', fontsize=14, loc='center', pad=15, fontweight='bold')
         return []
     
-    ani = animation.FuncAnimation(
-        fig, update, frames=len(full_path),
-        init_func=init, blit=False, interval=150, repeat=False
-    )
-
+    ani = animation.FuncAnimation(fig, update, frames=max_frames, init_func=init, blit=False, interval=150, repeat=False)
     plt.tight_layout()
     plt.show()
 
