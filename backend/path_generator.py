@@ -13,7 +13,7 @@ def generate_path(starting_position, waypoints):
     first_segment = list(bresenham(starting_position[0], starting_position[1], waypoints[0][0], waypoints[0][1]))[:-1]
     rest = []
     for first_point, second_point in zip(waypoints[:-1], waypoints[1:]):
-        rest.extend(list(bresenham(first_point[0], first_point[1], second_point[0], second_point[1])))
+        rest.extend(list(bresenham(first_point[0], first_point[1], second_point[0], second_point[1]))[:-1])
 
     rest.extend(list(bresenham(waypoints[-1][0], waypoints[-1][1], waypoints[0][0], waypoints[0][1]))[:-1])
 

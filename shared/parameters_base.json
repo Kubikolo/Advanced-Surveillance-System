@@ -1,0 +1,8 @@
+{
+  "objects": [[[6, 1], [7, 1], [8, 1], [8, 2], [9, 1]], [[4, 3], [4, 4], [5, 4], [6, 4]], [[2, 2]]],
+  "drones": [
+    {"starting_position": [1, 1], "radius": 5, "tickspeed": 2},
+    {"starting_position": [2, 4], "radius": 2, "tickspeed": 3}
+  ],
+  "dimensions": [11, 6]
+}
