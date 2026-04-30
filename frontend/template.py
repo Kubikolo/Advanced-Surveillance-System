@@ -1,144 +1,305 @@
-import json
+import sys
 import os
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import matplotlib.animation as animation
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-import matplotlib.image as mpimg
-from matplotlib.widgets import Button, CheckButtons
+import json
+from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
+                               QLabel, QPushButton, QGroupBox, QFormLayout, 
+                               QListWidget, QMessageBox, QGraphicsView, 
+                               QGraphicsScene, QGraphicsRectItem, QGraphicsEllipseItem,
+                               QGraphicsPixmapItem, QGraphicsPathItem, QCheckBox)
+from PySide6.QtCore import Qt, Signal, QRectF, QTimer, QPointF
+from PySide6.QtGui import QColor, QBrush, QPen, QMouseEvent, QPainter, QPixmap, QPainterPath
 
-def normalize_paths(data_list, drone_count):
-    if not data_list:
-        return [[] for _ in range(drone_count)]
-    if not isinstance(data_list[0][0], (list, tuple)):
-        result = [data_list]
-        for _ in range(drone_count - 1):
-            result.append([])
-        return result
-    return data_list
+CELL_SIZE = 40
+WONG_PALETTE = ['#0072B2', '#D55E00', '#009E73', '#CC79A7', '#F0E442', '#56B4E9', '#E69F00']
 
-def main():
-    plt.rcParams['toolbar'] = 'None'
-    
-    base_path = os.path.dirname(os.path.abspath(__file__))
-    json_path = os.path.join(base_path, '..', 'shared', 'simulation_base.json')
-    drone_img_path = os.path.join(base_path, 'drone.png')
+class SimulationGraphicsView(QGraphicsView):
+    scale_ratio = 1.2
 
-    try:
-        with open(json_path, 'r') as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        print(f"Error: Could not find file: {json_path}")
-        return
+    def __init__(self, scene):
+        super().__init__(scene)
+        self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-    objects = data.get("objects", [])
-    drones_data = data.get("drones", [])
-    dimensions = data.get("dimensions", [10, 10])
-    width, height = dimensions[0], dimensions[1]
-
-    initial_steps_raw = data.get("initial_steps", [])
-    loop_steps_raw = data.get("loop_steps", [])
-
-    drone_count = len(drones_data) if drones_data else 1
-    initial_paths = normalize_paths(initial_steps_raw, drone_count)
-    loop_paths = normalize_paths(loop_steps_raw, drone_count)
-
-    wong_palette = ['#0072B2', '#D55E00', '#009E73', '#CC79A7', '#F0E442', '#56B4E9', '#E69F00']
-    color_bg = '#000000'
-    color_obstacle = '#E69F00'
-
-    plt.style.use('dark_background')
-    fig, ax = plt.subplots(figsize=(12, 8))
-    fig.patch.set_facecolor('#1a1a1a')
-    ax.set_facecolor(color_bg)
-    ax.set_aspect('equal', adjustable='box')
-    
-    plt.subplots_adjust(bottom=0.2, right=0.82)
-    
-    ax.grid(True, color='#333333', linestyle='-', linewidth=0.5, zorder=0)
-
-    for obj in objects:
-        for block in obj:
-            rect = patches.Rectangle(
-                (block[0] - 0.5, block[1] - 0.5), 1, 1,
-                linewidth=1, edgecolor='#111111', facecolor=color_obstacle, alpha=1.0, zorder=2
-            )
-            ax.add_patch(rect)
-
-    boundary = patches.Rectangle(
-        (-0.5, -0.5), width, height,
-        linewidth=2, edgecolor='#FF3366', facecolor='none', linestyle='-.', 
-        zorder=5, label='Declared boundary'
-    )
-    ax.add_patch(boundary)
-
-    drone_artists = []
-    has_drone_img = os.path.exists(drone_img_path)
-    drone_image_data = None
-    if has_drone_img:
-        try:
-            drone_image_data = mpimg.imread(drone_img_path)
-        except Exception as e:
-            print(f"Error loading drone.png: {e}")
-            has_drone_img = False
-
-    for i in range(drone_count):
-        color = wong_palette[i % len(wong_palette)]
-        trail, = ax.plot([], [], color=color, linewidth=2, alpha=0.6, zorder=8)
-        
-        d_config = drones_data[i] if i < len(drones_data) else {}
-        radius = d_config.get("radius", 1)
-        vision = patches.Rectangle((0, 0), radius*2, radius*2, color=color, fill=True, alpha=0.15, zorder=9)
-        ax.add_patch(vision)
-
-        drone_obj = None
-        if has_drone_img:
-            drone_obj = ax.imshow(drone_image_data, extent=[0, 1, 0, 1], zorder=10)
-            drone_obj.set_visible(False)
-        else:
-            drone_obj, = ax.plot([], [], marker='o', color=color, markersize=10, markeredgecolor='white', zorder=10)
-
-        drone_artists.append({
-            'trail': trail,
-            'vision': vision,
-            'drone': drone_obj,
-            'history_x': [],
-            'history_y': [],
-            'radius': radius,
-            'initial': initial_paths[i],
-            'loop': loop_paths[i],
-            'tickspeed': max(1, d_config.get("tickspeed", 1)),
-            'color': color
-        })
-
-    all_raw_points = [p for path in (initial_paths + loop_paths) for p in path]
-    min_x = min([p[0] for p in all_raw_points] or [0]) - 5
-    max_x = max([p[0] for p in all_raw_points] or [width]) + 5
-    min_y = min([p[1] for p in all_raw_points] or [0]) - 5
-    max_y = max([p[1] for p in all_raw_points] or [height]) + 5
-    ax.set_xlim(min_x, max_x)
-    ax.set_ylim(min_y, max_y)
-
-    def init():
-        for art in drone_artists:
-            art['trail'].set_data([], [])
-            art['history_x'].clear()
-            art['history_y'].clear()
-            r = art['radius']
-            art['vision'].set_xy((-r, -r))
-            if has_drone_img:
-                art['drone'].set_visible(True)
+    def wheelEvent(self, event):
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            if event.angleDelta().y() > 0:
+                self.zoom_in()
             else:
-                art['drone'].set_data([], [])
-        return []
+                self.zoom_out()
+        else:
+            super().wheelEvent(event)
 
-    def update(frame):
-        for art in drone_artists:
-            eff_frame = frame // art['tickspeed']
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+            fake_event = QMouseEvent(event.type(), event.position(), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, event.modifiers())
+            super().mousePressEvent(fake_event)
+            return
+        super().mousePressEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        super().mouseReleaseEvent(event)
+
+    def zoom_in(self):
+        self.scale(SimulationGraphicsView.scale_ratio, SimulationGraphicsView.scale_ratio)
+
+    def zoom_out(self):
+        self.scale(1 / SimulationGraphicsView.scale_ratio, 1 / SimulationGraphicsView.scale_ratio)
+
+class SimulationWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        
+        self.drone_artists = []
+        self.frame = 0
+        self.is_playing = True
+        self.max_frames = 0
+        
+        self.load_data()
+        self.init_ui()
+        self.init_simulation()
+        
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_frame)
+        self.timer.start(100)
+
+    def load_data(self):
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        json_path = os.path.join(base_path, '..', 'shared', 'simulation_base.json')
+        self.drone_img_path = os.path.join(base_path, 'drone.png')
+
+        try:
+            with open(json_path, 'r') as f:
+                self.data = json.load(f)
+        except FileNotFoundError:
+            QMessageBox.critical(self, "Error", f"Could not find file: {json_path}")
+            sys.exit(1)
+
+        self.objects = self.data.get("objects", [])
+        self.drones_data = self.data.get("drones", [])
+        self.dimensions = self.data.get("dimensions", [10, 10])
+        
+        initial_steps_raw = self.data.get("initial_steps", [])
+        loop_steps_raw = self.data.get("loop_steps", [])
+
+        drone_count = len(self.drones_data) if self.drones_data else 1
+        
+        def normalize(data_list, count):
+            if not data_list: return [[] for _ in range(count)]
+            if not isinstance(data_list[0][0], (list, tuple)):
+                res = [data_list]
+                for _ in range(count - 1): res.append([])
+                return res
+            return data_list
+            
+        initial_paths = normalize(initial_steps_raw, drone_count)
+        loop_paths = normalize(loop_steps_raw, drone_count)
+
+        self.initial_paths = initial_paths
+        self.loop_paths = loop_paths
+        self.full_paths = []
+        for i in range(drone_count):
+            path = initial_paths[i] + loop_paths[i]
+            self.full_paths.append(path)
+
+    def init_ui(self):
+        self.setWindowTitle('Advanced Surveillance Visualization')
+        self.resize(1300, 800)
+        self.setStyleSheet("background-color: #1e1e1e; color: #ffffff;")
+
+        main_layout = QHBoxLayout(self)
+
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(15)
+
+        control_group = QGroupBox("Playback Controls")
+        control_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #555; padding-top: 15px; margin-top: 10px;}")
+        control_layout = QVBoxLayout()
+        
+        self.btn_play_pause = QPushButton("PAUSE")
+        self.btn_play_pause.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; font-weight: bold;")
+        self.btn_play_pause.clicked.connect(self.toggle_playback)
+        
+        self.lbl_frame = QLabel("Tick: 0")
+        self.lbl_frame.setStyleSheet("color: #56B4E9; font-weight: bold; font-size: 14px;")
+        
+        control_layout.addWidget(self.btn_play_pause)
+        control_layout.addWidget(self.lbl_frame)
+        control_group.setLayout(control_layout)
+        left_layout.addWidget(control_group)
+
+        left_layout.addStretch()
+        main_layout.addLayout(left_layout, 1)
+
+        center_layout = QVBoxLayout()
+        zoom_layout = QHBoxLayout()
+        lbl_zoom = QLabel("Use Ctrl+Scroll or MMB-Drag to pan")
+        lbl_zoom.setStyleSheet("color: #888;")
+        btn_zoom_in = QPushButton("Zoom +")
+        btn_zoom_out = QPushButton("Zoom -")
+        btn_zoom_in.setStyleSheet("background-color: #444; padding: 5px;")
+        btn_zoom_out.setStyleSheet("background-color: #444; padding: 5px;")
+        zoom_layout.addWidget(lbl_zoom)
+        zoom_layout.addStretch()
+        zoom_layout.addWidget(btn_zoom_out)
+        zoom_layout.addWidget(btn_zoom_in)
+
+        self.scene = QGraphicsScene()
+        self.scene.setBackgroundBrush(QColor("#121212"))
+        
+        self.view = SimulationGraphicsView(self.scene)
+        self.view.setStyleSheet("border: 1px solid #444;")
+        
+        btn_zoom_in.clicked.connect(self.view.zoom_in)
+        btn_zoom_out.clicked.connect(self.view.zoom_out)
+
+        center_layout.addLayout(zoom_layout)
+        center_layout.addWidget(self.view)
+        
+        main_layout.addLayout(center_layout, 5)
+
+        right_layout = QVBoxLayout()
+        self.list_group = QGroupBox("Active Drones")
+        self.list_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #555; padding-top: 15px; margin-top: 10px;}")
+        list_layout = QVBoxLayout()
+        
+        self.drone_list = QListWidget()
+        self.drone_list.setStyleSheet("background-color: #333; padding: 5px;")
+        list_layout.addWidget(self.drone_list)
+        
+        self.list_group.setLayout(list_layout)
+        right_layout.addWidget(self.list_group, 2)
+        
+        self.visibility_group = QGroupBox("Trail Visibility")
+        self.visibility_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #555; padding-top: 15px; margin-top: 10px;}")
+        self.vis_layout = QVBoxLayout()
+        self.visibility_group.setLayout(self.vis_layout)
+        right_layout.addWidget(self.visibility_group, 1)
+
+        main_layout.addLayout(right_layout, 1)
+
+    def init_simulation(self):
+        width, height = self.dimensions[0], self.dimensions[1]
+
+        grid_pen = QPen(QColor("#333333"))
+        grid_brush = QBrush(QColor("#2b2b2b"))
+        for row in range(height):
+            for col in range(width):
+                rect = QGraphicsRectItem(col * CELL_SIZE, row * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                rect.setPen(grid_pen)
+                rect.setBrush(grid_brush)
+                self.scene.addItem(rect)
+
+        obs_brush = QBrush(QColor("#E69F00"))
+        obs_pen = QPen(QColor("#111111"))
+        for obj in self.objects:
+            for block in obj:
+                rect = QGraphicsRectItem(block[0] * CELL_SIZE, block[1] * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                rect.setBrush(obs_brush)
+                rect.setPen(obs_pen)
+                self.scene.addItem(rect)
+
+        bound_pen = QPen(QColor("#FF3366"))
+        bound_pen.setWidth(2)
+        bound_pen.setStyle(Qt.PenStyle.DashLine)
+        boundary = QGraphicsRectItem(0, 0, width * CELL_SIZE, height * CELL_SIZE)
+        boundary.setPen(bound_pen)
+        boundary.setZValue(5)
+        self.scene.addItem(boundary)
+
+        has_drone_img = os.path.exists(self.drone_img_path)
+        raw_pixmap = QPixmap(self.drone_img_path) if has_drone_img else None
+
+        margin = CELL_SIZE * 2
+        self.scene.setSceneRect(-margin, -margin, width * CELL_SIZE + margin * 2, height * CELL_SIZE + margin * 2)
+
+        for i, path in enumerate(self.full_paths):
+            color_hex = WONG_PALETTE[i % len(WONG_PALETTE)]
+            color = QColor(color_hex)
+            
+            drone_id = f"Drone {i+1}"
+            self.drone_list.addItem(drone_id)
+
+            chk = QCheckBox(f"Show {drone_id} Path")
+            chk.setChecked(True)
+            chk.setStyleSheet(f"color: {color_hex}; font-weight: bold;")
+            chk.stateChanged.connect(lambda state, idx=i: self.toggle_trail(idx, state))
+            self.vis_layout.addWidget(chk)
+
+            trail_pen = QPen(color)
+            trail_pen.setWidth(3)
+            trail_path_item = QGraphicsPathItem()
+            trail_path_item.setPen(trail_pen)
+            trail_path_item.setZValue(8)
+            self.scene.addItem(trail_path_item)
+
+            d_config = self.drones_data[i] if i < len(self.drones_data) else {}
+            radius = d_config.get("radius", 1)
+            tickspeed = max(1, d_config.get("tickspeed", 1))
+
+            vis_color = QColor(color)
+            vis_color.setAlpha(40)
+            vision_rect = QGraphicsRectItem(0, 0, radius * 2 * CELL_SIZE, radius * 2 * CELL_SIZE)
+            vision_rect.setBrush(QBrush(vis_color))
+            vision_rect.setPen(Qt.PenStyle.NoPen)
+            vision_rect.setZValue(9)
+            self.scene.addItem(vision_rect)
+
+            if has_drone_img:
+                scaled = raw_pixmap.scaled(CELL_SIZE, CELL_SIZE, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                drone_item = QGraphicsPixmapItem(scaled)
+                drone_item.setOffset(-scaled.width()/2, -scaled.height()/2)
+            else:
+                drone_item = QGraphicsEllipseItem(-CELL_SIZE/2, -CELL_SIZE/2, CELL_SIZE, CELL_SIZE)
+                drone_item.setBrush(QBrush(color))
+                drone_item.setPen(QPen(Qt.GlobalColor.white))
+            
+            drone_item.setZValue(10)
+            self.scene.addItem(drone_item)
+
+            self.drone_artists.append({
+                'trail': trail_path_item,
+                'vision': vision_rect,
+                'drone': drone_item,
+                'radius': radius,
+                'initial': self.initial_paths[i],
+                'loop': self.loop_paths[i],
+                'tickspeed': tickspeed
+            })
+
+        QTimer.singleShot(100, lambda: self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio))
+
+    def toggle_playback(self):
+        self.is_playing = not self.is_playing
+        if self.is_playing:
+            self.btn_play_pause.setText("PAUSE")
+            self.btn_play_pause.setStyleSheet("background-color: #4CAF50; color: white; padding: 10px; font-weight: bold;")
+            self.timer.start()
+        else:
+            self.btn_play_pause.setText("RESUME")
+            self.btn_play_pause.setStyleSheet("background-color: #f44336; color: white; padding: 10px; font-weight: bold;")
+            self.timer.stop()
+
+    def toggle_trail(self, idx, state):
+        is_checked = (state == 2)
+        self.drone_artists[idx]['trail'].setVisible(is_checked)
+
+    def update_frame(self):
+        self.lbl_frame.setText(f"Tick: {self.frame:04d}")
+
+        for art in self.drone_artists:
+            eff_frame = self.frame // art['tickspeed']
             initial = art['initial']
             loop = art['loop']
-            if not initial and not loop: continue
             
+            if not initial and not loop:
+                continue
+                
             if eff_frame < len(initial):
                 pos = initial[eff_frame]
             elif loop:
@@ -146,68 +307,25 @@ def main():
                 pos = loop[p_idx]
             else:
                 pos = initial[-1]
-            
-            art['history_x'].append(pos[0])
-            art['history_y'].append(pos[1])
-            art['trail'].set_data(art['history_x'], art['history_y'])
-            
-            r = art['radius']
-            art['vision'].set_xy((pos[0] - r, pos[1] - r))
-            if has_drone_img:
-                art['drone'].set_extent([pos[0]-0.5, pos[0]+0.5, pos[1]-0.5, pos[1]+0.5])
+
+            px = pos[0] * CELL_SIZE + CELL_SIZE / 2
+            py = pos[1] * CELL_SIZE + CELL_SIZE / 2
+
+            qpath = art['trail'].path()
+            if qpath.elementCount() == 0:
+                qpath.moveTo(px, py)
             else:
-                art['drone'].set_data([pos[0]], [pos[1]])
-        
-        ax.set_title(f"Interactive Surveillance System | Tick: {frame:04d}", color='#FFFFFF', fontsize=14, loc='center', pad=15, fontweight='bold')
-        return []
+                qpath.lineTo(px, py)
+            art['trail'].setPath(qpath)
 
-    ani = animation.FuncAnimation(fig, update, frames=20000, init_func=init, blit=False, interval=100, repeat=False)
+            r_px = art['radius'] * CELL_SIZE
+            art['vision'].setPos(px - r_px, py - r_px)
+            art['drone'].setPos(px, py)
 
-    class UIHandlers:
-        def __init__(self, animation_obj, artists, labels):
-            self.ani = animation_obj
-            self.artists = artists
-            self.labels = labels
-            self.paused = False
-        
-        def toggle_pause(self, event):
-            if self.paused:
-                self.ani.resume()
-                self.btn_pause.label.set_text('PAUSE')
-            else:
-                self.ani.pause()
-                self.btn_pause.label.set_text('RESUME')
-            self.paused = not self.paused
-            plt.draw()
+        self.frame += 1
 
-        def toggle_trails(self, label):
-            if label in self.labels:
-                idx = self.labels.index(label)
-                visible = self.artists[idx]['trail'].get_visible()
-                self.artists[idx]['trail'].set_visible(not visible)
-                plt.draw()
-
-    labels = [f"Drone {i+1} Path" for i in range(drone_count)]
-    ui = UIHandlers(ani, drone_artists, labels)
-
-    ax_btn_pause = plt.axes([0.1, 0.05, 0.15, 0.06])
-    ui.btn_pause = Button(ax_btn_pause, 'PAUSE', color='#333333', hovercolor='#444444')
-    ui.btn_pause.label.set_color('white')
-    ui.btn_pause.label.set_fontweight('bold')
-    ui.btn_pause.on_clicked(ui.toggle_pause)
-
-    ax_check = plt.axes([0.84, 0.4, 0.14, 0.3])
-    ax_check.set_facecolor('#1a1a1a')
-    visibility = [True] * drone_count
-    check = CheckButtons(
-        ax_check, labels, visibility,
-        label_props={'color': ['white']*drone_count, 'fontsize': [10]*drone_count},
-        check_props={'facecolor': [d['color'] for d in drone_artists]}
-    )
-    
-    check.on_clicked(ui.toggle_trails)
-
-    plt.show()
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    window = SimulationWindow()
+    window.show()
+    sys.exit(app.exec())
