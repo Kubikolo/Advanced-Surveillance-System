@@ -57,40 +57,52 @@ class Evolution:
         current_drone_pos = [drone.starting_position for drone in self.drones]
         object_scores = [0] * len(self.objects)
         first_paths, loop_paths = generate_paths_for_all_drones(self.drones, gene)
-        for tick in range(self.tickcount):
-            for i, obj in enumerate(self.objects):
-                covered_cells = 0
-                object_cells = len(obj)
-                for cell in obj:
-                    for drone, pos in zip(self.drones, current_drone_pos):
-                        if self.check_object_coverage(drone, pos, cell):
-                            break
-                    else:
-                        continue
-                    
-                    covered_cells += 1
-                
-                if covered_cells == object_cells:
-                    object_scores[i] += 1
-                else:
-                    coverage_ratio = covered_cells / object_cells
-                    object_scores[i] += 0.2 * pow(2, coverage_ratio//0.1-9) # magia
-            
-            for i, drone in enumerate(self.drones):
-                if (tick + 1) % drone.tickspeed == 0:
-                    move_count = (tick + 1) // drone.tickspeed
-                    if move_count < len(first_paths[i]):
-                        current_drone_pos[i] = first_paths[i][move_count]
-                    else:
-                        current_drone_pos[i] = loop_paths[i][(move_count - len(first_paths[i])) % len(loop_paths[i])]
-                    
-        print(object_scores)
-        return min(object_scores)
 
+        for tick in range(self.tickcount):
+
+            for i, obj in enumerate(self.objects):
+                covered_cells = self.get_covered_cells(obj, current_drone_pos)
+                object_cells = len(obj)
+                object_scores[i] += self.calculate_object_score(covered_cells, object_cells)
+            
+            self.move_drones(current_drone_pos, tick, first_paths, loop_paths)
+        
+        return min(object_scores)
+    
+    def move_drones(self, current_drone_pos, tick, first_paths, loop_paths):
+        for i, drone in enumerate(self.drones):
+            if (tick + 1) % drone.tickspeed == 0:
+                move_count = (tick + 1) // drone.tickspeed
+                if move_count < len(first_paths[i]):
+                    current_drone_pos[i] = first_paths[i][move_count]
+                else:
+                    current_drone_pos[i] = loop_paths[i][(move_count - len(first_paths[i])) % len(loop_paths[i])]
+    
+    def get_covered_cells(self, obj, current_drone_pos):
+        covered_cells = 0
+        for cell in obj:
+            for drone, pos in zip(self.drones, current_drone_pos):
+                if self.check_cell_coverage(drone, pos, cell):
+                    break
+            else:
+                continue
+            
+            covered_cells += 1
+
+        return covered_cells
+    
     @staticmethod
-    def check_object_coverage(drone, drone_pos, cell):
+    def check_cell_coverage(drone, drone_pos, cell):
         dist = max(abs(drone_pos[0] - cell[0]), abs(drone_pos[1] - cell[1]))
         return dist <= drone.radius
+    
+    @staticmethod
+    def calculate_object_score(covered_cells, object_cells):
+        if covered_cells == object_cells:
+            return 1
+        else:
+            coverage_ratio = covered_cells / object_cells
+            return 0.2 * pow(2, coverage_ratio//0.1-9) # magia
 
     def selection(self):
         # na podsatwie fitnessów wybieramy najlepszą część populacji (albo top n, albo np losowo z wagami fitness)
