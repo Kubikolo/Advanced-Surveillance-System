@@ -1,7 +1,19 @@
 import json
+import sys
 
-from backend.drone import Drone
-from backend.path_generator import generate_path
+from first_gen import generate_first_gen
+from drone import Drone
+from path_generator import generate_path, generate_paths_for_all_drones
+
+
+def drone_serializer(obj):
+    if isinstance(obj, Drone):
+        return {
+            "starting_position": obj.starting_position,
+            "radius": obj.radius,
+            "tickspeed": obj.tickspeed
+        }
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 
 def parameters_parser(filename):
@@ -20,12 +32,15 @@ def simulation_json_generator(filename, initial_steps, loop_steps, parameters):
                     "objects": parameters["objects"],
                     "drones": parameters["drones"],
                     "dimensions": parameters["dimensions"]
-                    }, json_file)
+                    }, json_file,
+                    default=drone_serializer,
+                    indent=4)
 
     return
 
 if __name__ == "__main__":
-    waypoints = [(20, 11), (31, 41), (40, 10), (3, 7)]
-    starting_position = (0, 0)
-    result = generate_path(starting_position, waypoints)
-    simulation_json_generator("simulation_base.json", result[0], result[1], parameters_parser("../shared/parameters_base.json"))
+    filename = sys.argv[1]
+    parameters = parameters_parser(f"../shared/parameters_{filename}")
+    waypoints = generate_first_gen(parameters["objects"], parameters["drones"])
+    result = generate_paths_for_all_drones(parameters["drones"], waypoints)
+    simulation_json_generator(f"simulation_{filename}.json", result[0], result[1], parameters)
