@@ -29,7 +29,7 @@ class Evolution:
         self.mutation_swap_rate = 0.1
         self.mutation_jitter_stdev = 1.5
 
-        self.tickcount = 100
+        self.tickcount = 1000
     
     def save_best_gene_to_json(self, filename):
         result = generate_paths_for_all_drones(self.drones, self.best_gene)
@@ -51,7 +51,7 @@ class Evolution:
         best_candidates = self.selection()
 
         best_score_generation = best_candidates[0][1]
-        print(f"generation {self.generation_number+1} best score: {best_score_generation}")
+        print(f"generation {self.generation_number+1} best score: {100*best_score_generation:.2f}%")
         self.record_best_gene(best_candidates[0])
 
         new_population = self.crossover(best_candidates)
@@ -85,7 +85,7 @@ class Evolution:
             self.calculate_tick_scores(current_positions, object_scores)
             self.move_drones(current_positions, tick, first_paths, loop_paths)
         
-        return min(object_scores)
+        return min(object_scores) / self.tickcount
     
     def calculate_tick_scores(self, current_positions, object_scores):
         for i, obj in enumerate(self.objects):
@@ -154,23 +154,59 @@ class Evolution:
         return new_population
 
     def crossover_two_genes(self, gene1, gene2):
-        if random.random() < 2: # ! self.crossover_elitism_rate: - TO WYŁĄCZA KRZYŻÓWKĘ
+        if random.random() < self.crossover_elitism_rate:
             return copy.deepcopy(random.choice([gene1, gene2]))
         
-        return [self.crossover_two_paths(p1, p2) for p1, p2 in zip(gene1, gene2)]
+        return [self.crossover_two_paths(copy.deepcopy(p1), copy.deepcopy(p2)) for p1, p2 in zip(gene1, gene2)] # potencjalnie nie trzeba deepcopy idk
 
     def crossover_two_paths(self, path1, path2):
         '''
         Moje i czata pomysły:
         1. Zamiana podciągu u jednego rodzica, z drugiego rodzica
-        2. 
+        2. Slice
 
-        A -> | B -> C -> D | -> E
-        A' -> B' -> | C' -> D' | -> E'
+        dad: A -> | B -> C -> D | -> E
+        mom: A' -> B' -> | C' -> D' | -> E'
 
         A -> C' -> D' -> E
         '''
-        pass
+        mutation_options = [
+            self.subsequence_swap,
+            self.parent_slice
+        ]
+
+        weights = [70, 30]
+
+        crossover_func = random.choices(mutation_options, weights=weights, k=1)[0]
+        return crossover_func(path1, path2)
+    
+    def subsequence_swap(self, path1, path2):
+        if len(path1) <= 2 or len(path2) <= 2:
+            return path1
+
+        dad_idx1 = random.randrange(1, len(path1)-1)
+        dad_idx2 = random.randrange(1, len(path1)-1)
+
+        dad_start = min(dad_idx1, dad_idx2)
+        dad_end = max(dad_idx1, dad_idx2)
+
+        mom_idx1 = random.randrange(1, len(path2)-1)
+        mom_idx2 = random.randrange(1, len(path2)-1)
+
+        mom_start = min(mom_idx1, mom_idx2)
+        mom_end = max(mom_idx1, mom_idx2)
+        
+        path1[dad_start:dad_end] = path2[mom_start:mom_end]
+
+        return path1
+    
+    def parent_slice(self, path1, path2):
+        slice_ratio = random.random()
+        slice_point_1 = int(len(path1) * slice_ratio)
+        slice_point_2 = int(len(path2) * slice_ratio)
+
+        new_path = path1[:slice_point_1] + path2[slice_point_2:]
+        return new_path
 
     def mutate(self, population):
         return [self.mutate_gene(gene) for gene in population]
