@@ -21,7 +21,7 @@ def main():
     plt.rcParams['toolbar'] = 'None'
     
     base_path = os.path.dirname(os.path.abspath(__file__))
-    json_path = os.path.join(base_path, '..', 'shared', 'simulation_base.json')
+    json_path = os.path.join(base_path, '..', 'shared', 'simulation_test_1.json')
     drone_img_path = os.path.join(base_path, 'drone.png')
 
     try:
