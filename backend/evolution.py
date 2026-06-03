@@ -29,7 +29,7 @@ class Evolution:
         self.mutation_swap_rate = 0.1
         self.mutation_jitter_stdev = 1.5
 
-        self.tickcount = 1000
+        self.tickcount = 200
     
     def save_best_gene_to_json(self, filename):
         result = generate_paths_for_all_drones(self.drones, self.best_gene)
