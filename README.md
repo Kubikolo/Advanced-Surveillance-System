@@ -1,4 +1,4 @@
-# Optymalizator Tras Dronów
+# Advanced Surveillance System
 
 System algorytmu genetycznego do optymalizacji tras patrolowych wielu dronów na siatce 2D. Na podstawie zestawu stref docelowych i ograniczeń dronów, silnik ewolucyjny wyznacza zapętlone trasy patrolowe maksymalizujące równomierne pokrycie wszystkich stref jednocześnie.
 
